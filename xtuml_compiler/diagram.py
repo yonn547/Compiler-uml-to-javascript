@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from math import ceil, sqrt
 
-from .ir.model import Model
+from .ir.model import Association, Model
 
 # Konstanta tata letak juga dipakai oleh GUI saat menggambar ke canvas.
 HEADER_HEIGHT = 34.0
@@ -21,6 +21,37 @@ MIN_WIDTH = 190.0
 MARGIN = 40.0
 GAP_X = 70.0
 GAP_Y = 60.0
+
+
+def is_many(multiplicity: str) -> bool:
+    """Apakah multiplicity mengizinkan lebih dari satu instance?"""
+    text = str(multiplicity or "").strip()
+    if not text:
+        return False
+    if "*" in text:
+        return True
+    upper = text.split("..")[-1].strip()
+    return upper.isdigit() and int(upper) > 1
+
+
+def cardinality_from_multiplicities(source: str, target: str) -> str:
+    """Ringkas multiplicity dua ujung menjadi ``1:1``, ``1:N``, ``N:1``, atau ``N:M``."""
+    left = "N" if is_many(source) else "1"
+    right = "N" if is_many(target) else "1"
+    if left == "N" and right == "N":
+        right = "M"
+    return f"{left}:{right}"
+
+
+def cardinality_label(association: Association) -> str:
+    """Kardinalitas relasi dari sudut pandang ``end_a -> end_b``.
+
+    Multiplicity pada IR xtUML melekat pada role di class tersebut, sehingga
+    multiplicity yang ditampilkan di dekat class A berasal dari ``end_b``.
+    """
+    return cardinality_from_multiplicities(
+        association.end_b.multiplicity, association.end_a.multiplicity
+    )
 
 
 @dataclass(frozen=True)
@@ -52,6 +83,7 @@ class DiagramEdge:
     target_side: str
     kind: str = "association"
     label: str = ""
+    cardinality: str = ""
     source_multiplicity: str = ""
     target_multiplicity: str = ""
     source_role: str = ""
@@ -228,6 +260,7 @@ def build_class_diagram_layout(model: Model) -> DiagramLayout:
                     source_side="bottom",
                     target_side="bottom",
                     label=association.name,
+                    cardinality=cardinality_label(association),
                     # Multiplicity/role milik ujung lawan: `Customer.orders [0..*]`
                     # ditulis di dekat class Order pada diagram UML.
                     source_multiplicity=association.end_b.multiplicity,
@@ -250,6 +283,7 @@ def build_class_diagram_layout(model: Model) -> DiagramLayout:
                 source_side=source_side,
                 target_side=target_side,
                 label=association.name,
+                cardinality=cardinality_label(association),
                 # Multiplicity/role milik ujung lawan, sesuai notasi UML.
                 source_multiplicity=association.end_b.multiplicity,
                 target_multiplicity=association.end_a.multiplicity,
@@ -314,12 +348,14 @@ def to_plantuml(model: Model, title: str | None = None) -> str:
         lines.append("}")
 
     for association in model.associations:
+        card = cardinality_label(association)
+        label = f"{association.name} [{card}]" if card else association.name
         lines.append(
             f"{_puml_name(association.end_a.class_name)} "
             f'"{_puml_escape(association.end_b.multiplicity)}" -- '
             f'"{_puml_escape(association.end_a.multiplicity)}" '
             f"{_puml_name(association.end_b.class_name)} "
-            f": {_puml_escape(association.name)}"
+            f": {_puml_escape(label)}"
         )
 
     for class_def in model.classes:
@@ -362,11 +398,13 @@ def to_mermaid(model: Model) -> str:
         lines.append("  }")
 
     for association in model.associations:
+        card = cardinality_label(association)
+        label = f"{association.name} [{card}]" if card else association.name
         lines.append(
             f"  {_mermaid_name(association.end_a.class_name)} "
             f'"{association.end_b.multiplicity}" -- '
             f'"{association.end_a.multiplicity}" '
-            f"{_mermaid_name(association.end_b.class_name)} : {association.name}"
+            f"{_mermaid_name(association.end_b.class_name)} : {label}"
         )
     for class_def in model.classes:
         if class_def.base:

@@ -3,8 +3,13 @@ import re
 
 import customtkinter as ctk
 from tkinter import filedialog
-from xtuml_compiler import Simulator, compile_text
+from xtuml_compiler import Simulator, collect_state_machines, compile_text, to_plantuml_state
 from xtuml_compiler.diagram import LINE_HEIGHT, build_class_diagram_layout, to_plantuml
+from xtuml_compiler.state_diagram import (
+    STATE_HEADER_HEIGHT,
+    STATE_LINE_HEIGHT,
+    build_state_machine_layout,
+)
 
 
 ctk.set_appearance_mode("System")
@@ -150,6 +155,9 @@ class UMLCompilerApp(ctk.CTk):
         self.simulator = Simulator()
         self.current_diagram_text = ""
         self.diagram_layout = None
+        self.state_machine_entries = []
+        self.current_state_diagram_text = ""
+        self.state_diagram_layout = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
@@ -313,6 +321,54 @@ class UMLCompilerApp(ctk.CTk):
         )
         self.clear_diagram("Kompile model dulu untuk melihat class diagram.")
 
+        state_tab = self.output_tabs.add("State Diagram")
+        state_tab.grid_rowconfigure(1, weight=1)
+        state_tab.grid_columnconfigure(0, weight=1)
+
+        self.state_controls = ctk.CTkFrame(state_tab, fg_color="transparent")
+        self.state_controls.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(6, 4))
+        ctk.CTkLabel(
+            self.state_controls, text="State machine:", font=("Segoe UI", 11), text_color="gray"
+        ).pack(side="left", padx=(6, 4))
+        self.state_machine_option = ctk.CTkOptionMenu(
+            self.state_controls, values=["-"], width=160, command=self.on_state_machine_selected
+        )
+        self.state_machine_option.pack(side="left", padx=4)
+        self.btn_state_copy = ctk.CTkButton(
+            self.state_controls,
+            text="📋 Salin PUML",
+            width=110,
+            command=self.copy_state_diagram,
+        )
+        self.btn_state_copy.pack(side="left", padx=(8, 4))
+        self.btn_state_save = ctk.CTkButton(
+            self.state_controls,
+            text="💾 Simpan .puml",
+            width=120,
+            command=self.save_state_diagram,
+        )
+        self.btn_state_save.pack(side="left", padx=4)
+        self.lbl_state_info = ctk.CTkLabel(
+            self.state_controls, text="Belum ada state machine", font=("Segoe UI", 11), text_color="gray"
+        )
+        self.lbl_state_info.pack(side="left", padx=8)
+
+        self.canvas_state = ctk.CTkCanvas(state_tab, bg=DIAGRAM_BG, highlightthickness=0)
+        self.canvas_state.grid(row=1, column=0, sticky="nsew")
+        self.scroll_state_y = ctk.CTkScrollbar(state_tab, command=self.canvas_state.yview)
+        self.scroll_state_y.grid(row=1, column=1, sticky="ns")
+        self.scroll_state_x = ctk.CTkScrollbar(
+            state_tab, orientation="horizontal", command=self.canvas_state.xview
+        )
+        self.scroll_state_x.grid(row=2, column=0, sticky="ew")
+        self.canvas_state.configure(
+            xscrollcommand=self.scroll_state_x.set, yscrollcommand=self.scroll_state_y.set
+        )
+        self.canvas_state.bind(
+            "<Configure>", lambda _event: self._update_state_scrollregion()
+        )
+        self.clear_state_diagram("Kompile model dulu untuk melihat state diagram.")
+
         # ------------------- DIAGNOSTICS / SIMULATOR -------------------
         self.bottom_tabs = ctk.CTkTabview(self, height=190)
         self.bottom_tabs.grid(row=3, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="ew")
@@ -409,8 +465,10 @@ class UMLCompilerApp(ctk.CTk):
         if result.ok:
             self.txt_output.insert("0.0", result.js)
             self.render_class_diagram(result.model)
+            self.populate_state_machines(result.model)
         else:
             self.clear_diagram("Compile gagal. Perbaiki model lalu compile ulang.")
+            self.clear_state_diagram("Compile gagal. Perbaiki model lalu compile ulang.")
 
         self.txt_diagnostic.delete("0.0", "end")
         self.txt_diagnostic.insert("0.0", result.message)
@@ -471,8 +529,10 @@ class UMLCompilerApp(ctk.CTk):
             self.clear_diagram("Model tidak memiliki class untuk ditampilkan.")
             return
 
+        cardinalities = [edge.cardinality for edge in layout.edges if edge.cardinality]
+        summary = f" ({', '.join(cardinalities)})" if cardinalities else ""
         self.lbl_diagram_info.configure(
-            text=f"{len(layout.classes)} class • {len(layout.edges)} relasi"
+            text=f"{len(layout.classes)} class • {len(layout.edges)} relasi{summary}"
         )
         self._draw_diagram_edges(layout)
         self._draw_diagram_classes(layout)
@@ -578,6 +638,15 @@ class UMLCompilerApp(ctk.CTk):
             label_y = (edge.y1 + edge.y2) / 2
             if edge.source == edge.target:
                 label_y = edge.y1 + 58
+            if edge.cardinality:
+                self.canvas_diagram.create_text(
+                    label_x,
+                    label_y - 15,
+                    text=f"[{edge.cardinality}]",
+                    fill=DIAGRAM_OPERATION,
+                    font=("Consolas", 9, "bold"),
+                    bbox=dict(fill=DIAGRAM_BG, outline=DIAGRAM_OPERATION),
+                )
             if edge.label:
                 self.canvas_diagram.create_text(
                     label_x,
@@ -650,6 +719,221 @@ class UMLCompilerApp(ctk.CTk):
             with open(file_path, "w", encoding="utf-8") as handle:
                 handle.write(text)
             self.set_status(f"💾 Class diagram disimpan di: {file_path}", color="#2ecc71")
+
+    # ------------------- STATE DIAGRAM -------------------
+    def clear_state_diagram(self, message: str = ""):
+        self.canvas_state.delete("all")
+        self.state_diagram_layout = None
+        self.current_state_diagram_text = ""
+        self.state_machine_entries = []
+        self.state_machine_option.configure(values=["-"])
+        self.state_machine_option.set("-")
+        self.lbl_state_info.configure(text="Belum ada state machine")
+        text = message or "Tidak ada state diagram untuk ditampilkan."
+        self.canvas_state.create_text(
+            20,
+            20,
+            anchor="nw",
+            text=text,
+            fill=DIAGRAM_MUTED,
+            font=("Segoe UI", 12),
+            width=520,
+        )
+        self._update_state_scrollregion()
+
+    def _update_state_scrollregion(self):
+        canvas = self.canvas_state
+        width = float(self.state_diagram_layout.width) if self.state_diagram_layout else 0.0
+        height = float(self.state_diagram_layout.height) if self.state_diagram_layout else 0.0
+        width = max(width, float(canvas.winfo_width() or 1))
+        height = max(height, float(canvas.winfo_height() or 1))
+        canvas.configure(scrollregion=(0, 0, width, height))
+
+    def populate_state_machines(self, model):
+        entries = collect_state_machines(model) if model else []
+        self.state_machine_entries = entries
+        labels = [f"{class_name}.{machine.name}" for class_name, machine in entries]
+        self.state_machine_option.configure(values=labels or ["-"])
+        if labels:
+            self.state_machine_option.set(labels[0])
+            self.on_state_machine_selected(labels[0])
+        else:
+            self.clear_state_diagram("Model tidak memiliki state machine.")
+
+    def on_state_machine_selected(self, name):
+        for class_name, machine in self.state_machine_entries:
+            if f"{class_name}.{machine.name}" == name:
+                self.current_state_diagram_text = to_plantuml_state(machine, class_name)
+                self.render_state_diagram(machine, class_name)
+                return
+        self.clear_state_diagram("Pilih state machine yang valid.")
+
+    def render_state_diagram(self, machine, class_name):
+        layout = build_state_machine_layout(machine)
+        self.state_diagram_layout = layout
+        self.canvas_state.delete("all")
+        if layout.is_empty:
+            self.clear_state_diagram("State machine tidak memiliki state.")
+            return
+
+        state_names = {node.name for node in layout.nodes if not node.pseudo}
+        transitions = [edge for edge in layout.edges if edge.kind == "transition"]
+        self.lbl_state_info.configure(
+            text=f"{len(state_names)} state • {len(transitions)} transisi"
+        )
+        self._draw_state_edges(layout)
+        self._draw_state_nodes(layout)
+        self._draw_state_labels(layout)
+        self._update_state_scrollregion()
+
+    def _draw_state_edges(self, layout):
+        for edge in layout.edges:
+            if edge.is_self:
+                loop_y = edge.y1 + 38
+                self.canvas_state.create_line(
+                    edge.x1,
+                    edge.y1,
+                    edge.x1,
+                    loop_y,
+                    edge.x2,
+                    loop_y,
+                    edge.x2,
+                    edge.y2,
+                    fill=DIAGRAM_LINE,
+                    width=2,
+                    smooth=True,
+                )
+            else:
+                self.canvas_state.create_line(
+                    edge.x1, edge.y1, edge.x2, edge.y2, fill=DIAGRAM_LINE, width=2
+                )
+
+    def _draw_state_nodes(self, layout):
+        for node in layout.nodes:
+            if node.pseudo:
+                self.canvas_state.create_oval(
+                    node.x,
+                    node.y,
+                    node.x + node.width,
+                    node.y + node.height,
+                    fill=DIAGRAM_TEXT,
+                    outline=DIAGRAM_TEXT,
+                )
+                continue
+
+            if node.final:
+                self.canvas_state.create_oval(
+                    node.x,
+                    node.y,
+                    node.x + node.width,
+                    node.y + node.height,
+                    fill=DIAGRAM_CLASS_BODY,
+                    outline=DIAGRAM_LINE,
+                    width=2,
+                )
+                self.canvas_state.create_oval(
+                    node.x + 5,
+                    node.y + 5,
+                    node.x + node.width - 5,
+                    node.y + node.height - 5,
+                    fill=DIAGRAM_CLASS_BODY,
+                    outline=DIAGRAM_LINE,
+                    width=2,
+                )
+            else:
+                self.canvas_state.create_rectangle(
+                    node.x,
+                    node.y,
+                    node.x + node.width,
+                    node.y + node.height,
+                    fill=DIAGRAM_CLASS_BODY,
+                    outline=DIAGRAM_LINE,
+                    width=2,
+                )
+
+            self.canvas_state.create_text(
+                node.x + node.width / 2,
+                node.y + STATE_HEADER_HEIGHT / 2,
+                text=node.name,
+                fill="#ffffff",
+                font=("Segoe UI", 11, "bold"),
+            )
+            text_y = node.y + STATE_HEADER_HEIGHT + 4
+            for action in node.entry:
+                self.canvas_state.create_text(
+                    node.x + 8,
+                    text_y,
+                    anchor="w",
+                    text=f"entry / {action}",
+                    fill=DIAGRAM_OPERATION,
+                    font=("Consolas", 9),
+                )
+                text_y += STATE_LINE_HEIGHT
+            for action in node.exit:
+                self.canvas_state.create_text(
+                    node.x + 8,
+                    text_y,
+                    anchor="w",
+                    text=f"exit / {action}",
+                    fill=DIAGRAM_MUTED,
+                    font=("Consolas", 9),
+                )
+                text_y += STATE_LINE_HEIGHT
+
+    def _draw_state_labels(self, layout):
+        for edge in layout.edges:
+            label_x = (edge.x1 + edge.x2) / 2
+            label_y = (edge.y1 + edge.y2) / 2
+            if edge.is_self:
+                label_y = edge.y1 + 42
+            if edge.label:
+                self.canvas_state.create_text(
+                    label_x,
+                    label_y,
+                    text=edge.label,
+                    fill=DIAGRAM_TEXT,
+                    font=("Consolas", 10, "bold"),
+                    bbox=dict(fill=DIAGRAM_BG, outline=""),
+                )
+            self._draw_state_arrow(edge.x2, edge.y2, edge.target_side)
+
+    def _draw_state_arrow(self, x, y, side):
+        points = {
+            "left": [(x, y), (x + 11, y - 6), (x + 11, y + 6)],
+            "right": [(x, y), (x - 11, y - 6), (x - 11, y + 6)],
+            "top": [(x, y), (x - 6, y + 11), (x + 6, y + 11)],
+            "bottom": [(x, y), (x - 6, y - 11), (x + 6, y - 11)],
+        }.get(side)
+        if not points:
+            return
+        self.canvas_state.create_polygon(
+            *(coord for point in points for coord in point),
+            fill=DIAGRAM_LINE,
+            outline=DIAGRAM_LINE,
+        )
+
+    def copy_state_diagram(self):
+        text = self.current_state_diagram_text.strip()
+        if not text:
+            self.set_status("⚠️ Compile model dulu untuk menyalin state diagram.", color="#e67e22")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.set_status("📋 State diagram PlantUML disalin ke clipboard!", color="#3498db")
+
+    def save_state_diagram(self):
+        text = self.current_state_diagram_text.strip()
+        if not text:
+            self.set_status("⚠️ Compile model dulu untuk menyimpan state diagram.", color="#e67e22")
+            return
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".puml",
+            filetypes=[("PlantUML Files", "*.puml"), ("All Files", "*.*")],
+        )
+        if file_path:
+            with open(file_path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            self.set_status(f"💾 State diagram disimpan di: {file_path}", color="#2ecc71")
 
     # ------------------- DIAGNOSTICS -------------------
     def highlight_diagnostics(self, result):
@@ -785,6 +1069,7 @@ class UMLCompilerApp(ctk.CTk):
         self.txt_input.delete("0.0", "end")
         self.txt_output.delete("0.0", "end")
         self.clear_diagram()
+        self.clear_state_diagram()
         self.txt_diagnostic.delete("0.0", "end")
         for tag in ("diag_error", "diag_warning"):
             self.txt_input.tag_remove(tag, "0.0", "end")

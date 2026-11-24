@@ -6,7 +6,15 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import FORMATS, __version__, compile_text, to_mermaid, to_plantuml, write_project
+from . import (
+    FORMATS,
+    __version__,
+    compile_text,
+    to_mermaid,
+    to_plantuml,
+    write_project,
+    write_state_diagrams,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("auto", "plantuml", "mermaid"),
         default="auto",
         help="format class diagram (default: ikuti ekstensi file)",
+    )
+    compile_parser.add_argument(
+        "--state-diagram", help="simpan state diagram ke file (.puml atau .mmd)"
+    )
+    compile_parser.add_argument(
+        "--state-diagram-format",
+        choices=("auto", "plantuml", "mermaid"),
+        default="auto",
+        help="format state diagram (default: ikuti ekstensi file)",
     )
     compile_parser.add_argument("--quiet", action="store_true", help="sembunyikan diagnostics")
 
@@ -97,6 +114,19 @@ def main(argv: list[str] | None = None) -> int:
         diagram_path.write_text(text, encoding="utf-8")
         if not args.quiet:
             print(f"Class diagram ({diagram_format}) ditulis ke {diagram_path}")
+
+    if args.state_diagram:
+        if result.model is None:
+            print("Model tidak tersedia untuk membuat state diagram.", file=sys.stderr)
+            return 1
+        written = write_state_diagrams(
+            result.model, args.state_diagram, args.state_diagram_format
+        )
+        if not written and not args.quiet:
+            print("Model tidak memiliki state machine.", file=sys.stderr)
+        elif not args.quiet:
+            for item in written:
+                print(f"State diagram ditulis ke {item}")
 
     if not result.ok:
         _print_diagnostics(result, quiet=False)

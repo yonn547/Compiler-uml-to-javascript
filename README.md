@@ -17,7 +17,8 @@ source → parser → IR kanonik → validator → generator → JS bundle / pro
   - bundle satu file `.js` (bisa dipakai di Node via `require` atau browser via `window.UmlModel`);
   - project multi-file ESM (`package.json`, `src/runtime.js`, `src/classes/*.js`, `src/model.js`, `src/index.js`).
 - **GUI** CustomTkinter: editor, diagnostics, pemilih format/target, contoh model, salin/simpan JS, simpan IR.
-- **Class diagram** di panel hasil (tab *Class Diagram*): class + atribut + operasi + state machine, datatype, asosiasi dengan multiplicity, dan generalisasi (`extends`) digambar langsung di canvas. Tombol *Salin PUML* / *Simpan .puml* tersedia di tab tersebut.
+- **Class diagram** di panel hasil (tab *Class Diagram*): class + atribut + operasi + state machine, datatype, asosiasi dengan multiplicity, kardinalitas relasi (`[1:1]`, `[1:N]`, `[N:1]`, `[N:M]`), dan generalisasi (`extends`) digambar langsung di canvas. Tombol *Salin PUML* / *Simpan .puml* tersedia di tab tersebut; label kardinalitas juga ikut diekspor ke PlantUML/Mermaid.
+- **State diagram** di tab *State Diagram*: pilih state machine (`Class.machine`), lihat state awal/akhir, transisi + guard, self-transition, serta action `entry`/`exit`. Bisa disalin/disimpan sebagai PlantUML; CLI juga bisa mengekspor PlantUML/Mermaid.
 - **Highlight error/peringatan langsung di editor** (baris bermasalah diberi warna; klik 2× diagnostics untuk lompat ke baris).
 - **Simulator interaktif** di tab *Simulator*: pilih instance, kirim event dengan payload JSON, lihat state/atribut/association dan log `console.log`, reset state. Simulator dijalankan sebagai proses Node yang tetap hidup antar-perintah.
 - **CLI** `python -m xtuml_compiler` dengan perintah `compile`, `check`, `formats`.
@@ -45,7 +46,7 @@ Jika `myenv` bawaan repo tidak aktif di mesin Anda (venv dibuat di path lain), j
 PYTHONPATH=myenv/lib/python3.12/site-packages python3 app.py
 ```
 
-Pilih *Muat Contoh Input... → xtUML DSL*, lalu tekan **Compile** (atau `Ctrl+Enter`). Panel kanan atas memiliki tab **JavaScript** dan **Class Diagram**; panel bawah menampilkan error/warning beserta nomor baris. Diagram bisa disalin sebagai PlantUML atau disimpan ke file `.puml`.
+Pilih *Muat Contoh Input... → xtUML DSL*, lalu tekan **Compile** (atau `Ctrl+Enter`). Panel kanan atas memiliki tab **JavaScript**, **Class Diagram**, dan **State Diagram**; panel bawah menampilkan error/warning beserta nomor baris. Diagram bisa disalin sebagai PlantUML atau disimpan ke file `.puml`.
 
 ## CLI
 
@@ -66,9 +67,12 @@ python -m xtuml_compiler formats
 # Ekspor class diagram (PlantUML atau Mermaid sesuai ekstensi)
 python -m xtuml_compiler compile examples/shop.xtuml --diagram dist/shop.puml
 python -m xtuml_compiler compile examples/shop.xtuml --diagram dist/shop.mmd
+
+# Ekspor state diagram (satu file per state machine)
+python -m xtuml_compiler compile examples/shop.xtuml --state-diagram dist/state.puml
 ```
 
-Opsi penting: `--format {auto,dsl,json,xml,plantuml}`, `--target {node,browser}`, `--project`, `--ir`, `--diagram`, `--diagram-format {auto,plantuml,mermaid}`, `--quiet`.
+Opsi penting: `--format {auto,dsl,json,xml,plantuml}`, `--target {node,browser}`, `--project`, `--ir`, `--diagram`, `--diagram-format {auto,plantuml,mermaid}`, `--state-diagram`, `--state-diagram-format {auto,plantuml,mermaid}`, `--quiet`.
 
 ## Contoh pemakaian hasil compile
 
@@ -95,6 +99,7 @@ app.py                         GUI CustomTkinter
 xtuml_compiler/
   diagnostics.py               error/warning/info + lokasi
   diagram.py                   class diagram: layout + PlantUML/Mermaid
+  state_diagram.py             state diagram: layout + PlantUML/Mermaid
   utils.py                     identifier JS, multiplicity, literal
   ir/model.py                  dataclass IR + serialisasi JSON
   validator.py                 analisis semantik

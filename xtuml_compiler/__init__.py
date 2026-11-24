@@ -14,13 +14,25 @@ from pathlib import Path
 from .backend.js.emitter import CodegenError, generate_bundle, generate_project
 from .backend.js.expression import ExpressionError
 from .diagnostics import Diagnostics
-from .diagram import build_class_diagram_layout, to_mermaid, to_plantuml
+from .diagram import (
+    build_class_diagram_layout,
+    cardinality_from_multiplicities,
+    cardinality_label,
+    to_mermaid,
+    to_plantuml,
+)
 from .frontend.dsl.parser import DSLParser
 from .frontend.json.parser import parse_json
 from .frontend.plantuml.parser import parse_plantuml
 from .frontend.xml.parser import parse_xml
 from .ir.model import Model
 from .simulator import Simulator
+from .state_diagram import (
+    collect_state_machines,
+    to_mermaid_state,
+    to_plantuml_state,
+    write_state_diagrams,
+)
 from .validator import validate
 
 
@@ -51,6 +63,24 @@ class CompileResult:
     def mermaid_diagram(self) -> str:
         """Sumber class diagram Mermaid dari model hasil compile."""
         return to_mermaid(self.model) if self.model else ""
+
+    @property
+    def state_diagrams(self) -> dict[str, str]:
+        """Sumber state diagram PlantUML, key: ``ClassName.machine``."""
+        if not self.model:
+            return {}
+        return {
+            f"{class_name}.{machine.name}": to_plantuml_state(machine, class_name)
+            for class_name, machine in collect_state_machines(self.model)
+        }
+
+    @property
+    def state_diagram(self) -> str:
+        """Sumber state diagram PlantUML pertama dari model hasil compile."""
+        if not self.model:
+            return ""
+        entries = collect_state_machines(self.model)
+        return to_plantuml_state(entries[0][1], entries[0][0]) if entries else ""
 
 
 def detect_format(text: str) -> str:
