@@ -1,3 +1,9 @@
+"""Legacy translator untuk object diagram.
+
+Implementasi xtUML yang lebih lengkap ada di paket `xtuml_compiler`.
+File ini dipertahankan hanya untuk kompatibilitas dengan pemanggil lama.
+"""
+
 import re
 import json
 import xml.etree.ElementTree as ET

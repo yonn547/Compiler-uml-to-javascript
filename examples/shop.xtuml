@@ -1,0 +1,48 @@
+// Contoh model xtUML dalam DSL teks.
+domain Shop {
+  datatype Money = real
+
+  class Customer {
+    attribute id : string
+    attribute name : string
+
+    state machine lifecycle {
+      event created
+      event activate
+
+      state new initial {
+        entry: log("Customer dibuat")
+      }
+      state active {
+        exit: log("keluar dari aktif")
+      }
+      state blocked
+
+      transition new -> active on activate when self.name != "" {
+        log("diaktifkan")
+      }
+      transition active -> blocked on created
+    }
+
+    operation label() : string {
+      return "Customer " + self.name
+    }
+  }
+
+  class Order {
+    attribute total : Money
+  }
+
+  association placedOrder between Customer.orders [0..*] and Order.customer [1]
+
+  instance c1 of Customer {
+    id = "C-1"
+    name = "Alice"
+  }
+
+  instance o1 of Order {
+    total = 150000
+  }
+
+  link c1 to o1 via placedOrder
+}

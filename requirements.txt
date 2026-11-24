@@ -1,0 +1,3 @@
+# Dibutuhkan hanya untuk menjalankan GUI (app.py).
+# Compiler inti dan CLI memakai standard library Python 3.10+.
+customtkinter>=5.2
